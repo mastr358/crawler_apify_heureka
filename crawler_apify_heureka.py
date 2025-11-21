@@ -4,17 +4,11 @@ from datetime import datetime
 from urllib.parse import urljoin
 
 from apify import Actor
-from apify_client import ApifyClient
 from bs4 import BeautifulSoup
 from playwright.async_api import Page
 
-# Apify SDK
-from apify import Actor
-# In newer Apify SDK versions, crawlers might be directly under apify or apify_client is separate.
-# However, the standard python sdk usually exposes it. 
-# Let's check if we need to install 'apify-client' or if the import path is different.
-# Actually, in apify-python-sdk v1.0+, it is `from apify import PlaywrightCrawler`.
-from apify import PlaywrightCrawler, PlaywrightCrawlingContext
+# Crawlee SDK (PlaywrightCrawler is in crawlee, not apify)
+from crawlee.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
 
 async def main():
     async with Actor:
