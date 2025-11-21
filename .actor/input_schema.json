@@ -1,37 +1,42 @@
 {
     "title": "Heureka Crawler Input",
     "type": "object",
+    "schemaVersion": 1,
     "properties": {
         "startUrls": {
             "title": "Start URLs",
             "type": "array",
             "description": "List of category URLs to start crawling from.",
             "editor": "requestListSources",
-            "prefill": [
+            "default": [
                 { "url": "https://www.heureka.cz/" }
             ]
         },
         "maxPages": {
             "title": "Max Pages",
             "type": "integer",
-            "description": "Maximum number of pages to crawl.",
+            "description": "Maximum number of pages to crawl (including both category and product pages).",
             "default": 100,
-            "editor": "number"
+            "minimum": 1
         },
         "maxProducts": {
             "title": "Max Products",
             "type": "integer",
-            "description": "Maximum number of products to scrape.",
+            "description": "Maximum number of products to scrape. Crawler will stop after reaching this limit.",
             "default": 1000,
-            "editor": "number"
+            "minimum": 1
         },
         "proxyConfiguration": {
             "title": "Proxy Configuration",
             "type": "object",
             "description": "Select proxies to be used by your crawler.",
             "editor": "proxy",
-            "prefill": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"], "apifyProxyCountry": "CZ" }
+            "default": { 
+                "useApifyProxy": true, 
+                "apifyProxyGroups": ["RESIDENTIAL"], 
+                "apifyProxyCountry": "CZ" 
+            }
         }
     },
-    "required": ["startUrls", "proxyConfiguration"]
+    "required": ["startUrls"]
 }
