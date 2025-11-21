@@ -1,9 +1,0 @@
-{
-    "actorSpecification": 1,
-    "name": "heureka-crawler",
-    "title": "Heureka.cz Crawler",
-    "description": "Scrapes product data from Heureka.cz using Playwright and Apify Proxy.",
-    "version": "0.1",
-    "dockerfile": "./Dockerfile",
-    "input": "./input_schema.json"
-}

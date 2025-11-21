@@ -1,28 +1,9 @@
 {
-  "actorSpecification": 1,
-  "name": "web-crawler-markdown",
-  "version": "1.0.0",
-  "buildTag": "latest",
-  "environmentVariables": {},
-  "dockerfile": "./Dockerfile",
-  "readme": "./README.md",
-  "input": "./input_schema.json",
-  "storages": {
-    "dataset": {
-      "actorSpecification": 1,
-      "title": "Crawled Pages",
-      "views": {
-        "overview": {
-          "title": "Overview",
-          "transformation": {
-            "fields": ["url", "title"]
-          },
-          "display": {
-            "component": "table",
-            "properties": {}
-          }
-        }
-      }
-    }
-  }
+    "actorSpecification": 1,
+    "name": "heureka-crawler",
+    "title": "Heureka.cz Crawler",
+    "description": "Scrapes product data from Heureka.cz using Playwright and Apify Proxy.",
+    "version": "0.1",
+    "dockerfile": "./Dockerfile",
+    "input": "./input_schema.json"
 }
