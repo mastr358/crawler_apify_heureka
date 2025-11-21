@@ -178,9 +178,7 @@ async def main():
             proxy_configuration=proxy_configuration,
             max_requests_per_crawl=max_pages,
             headless=True,
-            browser_pool_options={
-                "use_fingerprints": True, # Use browser fingerprinting
-            }
+            # fingerprint_generator='default' enables browser fingerprinting by default
         )
 
         # Run the crawler
