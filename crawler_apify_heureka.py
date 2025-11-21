@@ -9,7 +9,12 @@ from bs4 import BeautifulSoup
 from playwright.async_api import Page
 
 # Apify SDK
-from apify.crawlers import PlaywrightCrawler, PlaywrightCrawlingContext
+from apify import Actor
+# In newer Apify SDK versions, crawlers might be directly under apify or apify_client is separate.
+# However, the standard python sdk usually exposes it. 
+# Let's check if we need to install 'apify-client' or if the import path is different.
+# Actually, in apify-python-sdk v1.0+, it is `from apify import PlaywrightCrawler`.
+from apify import PlaywrightCrawler, PlaywrightCrawlingContext
 
 async def main():
     async with Actor:
@@ -19,11 +24,16 @@ async def main():
         actor_input = await Actor.get_input() or {}
         start_urls = actor_input.get('startUrls', [])
         proxy_config = actor_input.get('proxyConfiguration')
-        max_pages = actor_input.get('maxRequestsPerCrawl', 100)
+        # Support both keys for backward compatibility or user preference
+        max_pages = actor_input.get('maxPages') or actor_input.get('maxRequestsPerCrawl', 100)
+        max_products = actor_input.get('maxProducts', 1000)
         
         if not start_urls:
             Actor.log.warning('No startUrls provided!')
             return
+
+        # State management for product count
+        product_count = 0
 
         # Create Proxy Configuration
         proxy_configuration = await Actor.create_proxy_configuration(
@@ -32,6 +42,13 @@ async def main():
 
         # Define the request handler
         async def request_handler(context: PlaywrightCrawlingContext):
+            nonlocal product_count
+            
+            # Check product limit
+            if max_products and product_count >= max_products:
+                Actor.log.info(f"Reached max products limit ({max_products}). Skipping {context.request.url}")
+                return
+
             page: Page = context.page
             request = context.request
             Actor.log.info(f'Processing {request.url} ...')
@@ -112,6 +129,10 @@ async def main():
                 )
 
         async def handle_product(context: PlaywrightCrawlingContext, soup: BeautifulSoup):
+            nonlocal product_count
+            if max_products and product_count >= max_products:
+                return
+
             request = context.request
             Actor.log.info(f'Scraping Product: {request.url}')
             
@@ -154,6 +175,8 @@ async def main():
             }
             
             await Actor.push_data(data)
+            product_count += 1
+            Actor.log.info(f"Products fetched: {product_count}/{max_products}")
 
         # Create the crawler
         crawler = PlaywrightCrawler(
