@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 
 from apify import Actor
 from bs4 import BeautifulSoup
+import gc  # For garbage collection
 from playwright.async_api import Page
 
 # Crawlee SDK (PlaywrightCrawler is in crawlee, not apify)
@@ -93,56 +94,89 @@ async def main():
                 # In a real scenario, we might want to retry or rotate session here
                 return
 
-            # Get content
-            content = await page.content()
-            soup = BeautifulSoup(content, 'html.parser')
-            
             # Determine page type (heuristic)
             # If we explicitly labeled it, use that. Otherwise guess.
             label = request.user_data.get('label', 'DETECT')
             
             if label == 'DETECT':
-                # Simple heuristic: Product pages usually have a "Do obchodu" (Go to store) button or specific price tables
-                # Category pages have lists of products.
-                if soup.select_one('.c-product-price__price') or soup.select_one('.c-offer-list'):
-                    label = 'PRODUCT'
-                else:
-                    label = 'CATEGORY'
+                # Use Playwright evaluation to detect page type - no BeautifulSoup needed
+                is_product = await page.evaluate('''() => {
+                    return document.querySelector('.c-product-price__price') !== null || 
+                           document.querySelector('.c-offer-list') !== null;
+                }''')
+                label = 'PRODUCT' if is_product else 'CATEGORY'
             
+            # Only parse HTML when we need to extract data
             if label == 'CATEGORY':
-                await handle_category(context, soup)
+                await handle_category_playwright(context, page)
             elif label == 'PRODUCT':
+                # For products, we still need soup for complex extraction
+                content = await page.content()
+                soup = BeautifulSoup(content, 'lxml')
                 await handle_product(context, soup)
+                soup.decompose()
+                del soup
+                del content
+                gc.collect()
 
-        async def handle_category(context: PlaywrightCrawlingContext, soup: BeautifulSoup):
+        async def handle_category_playwright(context: PlaywrightCrawlingContext, page: Page):
+            """Handle category pages using Playwright evaluation - no BeautifulSoup"""
             request = context.request
             Actor.log.info(f'Scraping Category: {request.url}')
             
-            # 1. Enqueue Products - ONLY links with .c-product__link class
-            product_links = []
-            for a in soup.select('a.c-product__link'):
-                href = a.get('href')
-                if href:
-                    full_url = urljoin(request.url, href)
-                    # Only add if it's on heureka.cz subdomain
-                    if '.heureka.cz' in full_url:
-                        product_links.append(full_url)
-
-            Actor.log.info(f"Found {len(product_links)} product links (.c-product__link)")
+            # Utility/non-product domains to ignore
+            IGNORE_DOMAINS = [
+                'ucet.heureka.cz',
+                'checkout.heureka.cz',
+                'sluzby.heureka.cz',
+                'napoveda.heureka.cz',
+                'obchody.heureka.cz',
+            ]
             
-            if product_links:
-                await context.enqueue_links(
-                    urls=product_links,
-                    label='PRODUCT',
-                    strategy='same-domain'
-                )
-
-            # 2. Enqueue Pagination (next page) - for finding more product links
-            next_btn = soup.select_one('a.c-pagination__link--next, a.next, .pagination a.next')
-            if next_btn and next_btn.get('href'):
-                next_url = urljoin(request.url, next_btn.get('href'))
-                # Only enqueue if it's on heureka.cz
-                if '.heureka.cz' in next_url:
+            # Extract product links using Playwright evaluation (no DOM parsing in Python)
+            product_links = await page.evaluate('''(baseUrl) => {
+                const links = [];
+                const productElements = document.querySelectorAll('a.c-product__link');
+                productElements.forEach(a => {
+                    const href = a.getAttribute('href');
+                    if (href) {
+                        // Resolve relative URLs
+                        const url = new URL(href, baseUrl).href;
+                        if (url.includes('.heureka.cz')) {
+                            links.push(url);
+                        }
+                    }
+                });
+                return links;
+            }''', request.url)
+            
+            # Filter ignored domains in Python (simpler)
+            filtered_links = [
+                url for url in product_links 
+                if not any(domain in url for domain in IGNORE_DOMAINS)
+            ]
+            
+            # Enqueue in batches
+            BATCH_SIZE = 20
+            for i in range(0, len(filtered_links), BATCH_SIZE):
+                batch = filtered_links[i:i+BATCH_SIZE]
+                if batch:
+                    await context.enqueue_links(
+                        urls=batch,
+                        label='PRODUCT',
+                        strategy='same-domain'
+                    )
+            
+            Actor.log.info(f"Found {len(filtered_links)} product links")
+            
+            # Check for pagination
+            next_url = await page.evaluate('''() => {
+                const nextBtn = document.querySelector('a.c-pagination__link--next, a.next, .pagination a.next');
+                return nextBtn ? nextBtn.href : null;
+            }''')
+            
+            if next_url and '.heureka.cz' in next_url:
+                if not any(domain in next_url for domain in IGNORE_DOMAINS):
                     Actor.log.info(f"Found pagination link: {next_url}")
                     await context.enqueue_links(
                         urls=[next_url],
@@ -158,40 +192,74 @@ async def main():
             request = context.request
             Actor.log.info(f'Scraping Product: {request.url}')
             
-            # Extract Data
-            title = soup.select_one('h1').get_text(strip=True) if soup.select_one('h1') else "Unknown"
-            
-            # Rating
-            rating_text = "0"
-            rating_elem = soup.select_one('.c-review-count__count, .rating-value')
-            if rating_elem:
-                rating_text = rating_elem.get_text(strip=True)
-            
-            # Lowest Price
-            price = "N/A"
-            price_elem = soup.select_one('.c-price__price, .price-wrapper')
-            if price_elem:
-                price = price_elem.get_text(strip=True)
-
-            # Store Prices (Top offers)
+            # Try to extract from JSON-LD structured data first (most reliable)
+            import json
+            title = "Unknown"
+            rating_value = None
+            review_count = None
+            lowest_price = "N/A"
+            highest_price = "N/A"
+            brand = "Unknown"
             store_prices = []
-            # Heureka often lists top offers in a specific box
-            offers = soup.select('.c-offer-list__item, .shops-list .item')
-            for offer in offers[:5]: # Top 5
-                store_name_elem = offer.select_one('.c-offer-list__shop-name, .shop-name')
-                price_elem = offer.select_one('.c-offer-list__price, .price')
-                
-                if store_name_elem and price_elem:
-                    store_prices.append({
-                        "store": store_name_elem.get_text(strip=True),
-                        "price": price_elem.get_text(strip=True)
-                    })
+            
+            # Find JSON-LD script tag
+            json_ld = soup.find('script', {'type': 'application/ld+json'})
+            if json_ld:
+                try:
+                    data_json = json.loads(json_ld.string)
+                    # JSON-LD contains @graph array with product data
+                    if isinstance(data_json, dict) and '@graph' in data_json:
+                        for item in data_json['@graph']:
+                            if item.get('@type') == 'Product':
+                                title = item.get('name', title)
+                                brand = item.get('brand', brand)
+                                
+                                # Rating
+                                agg_rating = item.get('aggregateRating', {})
+                                rating_value = agg_rating.get('ratingValue')
+                                review_count = agg_rating.get('reviewCount')
+                                
+                                # Prices
+                                offers = item.get('offers', {})
+                                if isinstance(offers, dict):
+                                    lowest_price = offers.get('lowPrice', lowest_price)
+                                    highest_price = offers.get('highPrice', highest_price)
+                                    
+                                    # Extract individual store offers
+                                    offer_list = offers.get('offers', [])
+                                    for offer in offer_list[:10]:  # Top 10 offers
+                                        if isinstance(offer, dict):
+                                            seller = offer.get('seller', {})
+                                            store_name = seller.get('name') if isinstance(seller, dict) else "Unknown"
+                                            price = offer.get('price')
+                                            availability = offer.get('availability', '').split('/')[-1]
+                                            
+                                            if price:
+                                                store_prices.append({
+                                                    "store": store_name,
+                                                    "price": str(price),
+                                                    "currency": "CZK",
+                                                    "availability": availability
+                                                })
+                                break
+                except Exception as e:
+                    Actor.log.warning(f"Failed to parse JSON-LD: {e}")
+            
+            # Fallback: Try to extract from HTML if JSON-LD failed
+            if title == "Unknown":
+                h1 = soup.select_one('h1.c-product-info__name, h1')
+                if h1:
+                    title = h1.get_text(strip=True)
 
             data = {
                 "url": request.url,
                 "title": title,
-                "rating": rating_text,
-                "lowest_price": price,
+                "brand": brand,
+                "rating": rating_value,
+                "review_count": review_count,
+                "lowest_price": lowest_price,
+                "highest_price": highest_price,
+                "currency": "CZK",
                 "store_prices": store_prices,
                 "crawled_at": datetime.now().isoformat()
             }
@@ -200,13 +268,16 @@ async def main():
             product_count += 1
             Actor.log.info(f"Products fetched: {product_count}/{max_products}")
 
-        # Create the crawler
+        # Create the crawler with memory-efficient settings
         crawler = PlaywrightCrawler(
             request_handler=request_handler,
             proxy_configuration=proxy_configuration,
             max_requests_per_crawl=max_pages,
             headless=True,
-            # fingerprint_generator='default' enables browser fingerprinting by default
+            max_request_retries=2,  # Reduce retries to save memory
+            max_crawl_depth=None,   # No depth limit but controlled by max_requests
+            # Use lower concurrency to reduce memory usage
+            max_concurrent_pages=1,  # Single page at a time for 1GB RAM
         )
 
         # Run the crawler
