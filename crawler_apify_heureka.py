@@ -276,8 +276,8 @@ async def main():
             headless=True,
             max_request_retries=2,  # Reduce retries to save memory
             max_crawl_depth=None,   # No depth limit but controlled by max_requests
-            # Use lower concurrency to reduce memory usage
-            max_concurrent_pages=1,  # Single page at a time for 1GB RAM
+            # Use lower concurrency to reduce memory usage - use max_concurrency instead
+            max_concurrency=1,  # Single page at a time for 1GB RAM
         )
 
         # Run the crawler
