@@ -268,16 +268,12 @@ async def main():
             product_count += 1
             Actor.log.info(f"Products fetched: {product_count}/{max_products}")
 
-        # Create the crawler with memory-efficient settings
+        # Create the crawler
         crawler = PlaywrightCrawler(
             request_handler=request_handler,
             proxy_configuration=proxy_configuration,
             max_requests_per_crawl=max_pages,
             headless=True,
-            max_request_retries=2,  # Reduce retries to save memory
-            max_crawl_depth=None,   # No depth limit but controlled by max_requests
-            # Use lower concurrency to reduce memory usage - use max_concurrency instead
-            max_concurrency=1,  # Single page at a time for 1GB RAM
         )
 
         # Run the crawler
