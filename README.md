@@ -27,5 +27,23 @@ https://podlahove-myci-stroje.heureka.cz/dyson-wash-g1
 
 # Crawler functionality
 
-- download full html of the pages into a temporary folder, we want to be able to run parsing separately when testing it, without having to download all the pages again
-- have ability to save progress and state and resume it, we'll be fetching hundreds of thousands of pages, potentially. 
+- Uses Playwright with browser fingerprinting to bypass Cloudflare protection
+- Requires Apify Residential Proxies (Czech Republic) to access Heureka.cz
+- Implements automatic session rotation on 403 errors
+- Saves progress in RequestQueue for resumable crawling
+- Respects maxPages and maxProducts limits
+
+# Proxy Configuration
+
+This crawler requires **Apify Residential Proxies** from Czech Republic to bypass Cloudflare protection.
+
+**Required settings:**
+```json
+{
+  "useApifyProxy": true,
+  "apifyProxyGroups": ["RESIDENTIAL"],
+  "apifyProxyCountry": "CZ"
+}
+```
+
+The actor will automatically use these settings by default when running on Apify Platform. 

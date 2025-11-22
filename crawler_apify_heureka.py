@@ -16,23 +16,59 @@ async def main():
         
         # Get input
         actor_input = await Actor.get_input() or {}
-        start_urls = actor_input.get('startUrls', [])
+        start_urls_input = actor_input.get('startUrls', [])
         proxy_config = actor_input.get('proxyConfiguration')
         # Support both keys for backward compatibility or user preference
         max_pages = actor_input.get('maxPages') or actor_input.get('maxRequestsPerCrawl', 100)
         max_products = actor_input.get('maxProducts', 1000)
         
-        if not start_urls:
+        if not start_urls_input:
             Actor.log.warning('No startUrls provided!')
             return
+        
+        # Extract URLs from startUrls (handle both string and dict format)
+        start_urls = []
+        for item in start_urls_input:
+            if isinstance(item, dict):
+                url = item.get('url')
+                if url:
+                    start_urls.append(url)
+            elif isinstance(item, str):
+                start_urls.append(item)
+        
+        if not start_urls:
+            Actor.log.warning('No valid URLs found in startUrls!')
+            return
+        
+        Actor.log.info(f'Starting crawl with {len(start_urls)} URLs: {start_urls}')
 
         # State management for product count
         product_count = 0
 
         # Create Proxy Configuration
-        proxy_configuration = await Actor.create_proxy_configuration(
-            actor_proxy_input=proxy_config
-        )
+        # Use residential proxies from Czech Republic for bypassing Cloudflare
+        proxy_configuration = None
+        
+        # Check if running on Apify platform
+        is_on_platform = Actor.is_at_home()
+        
+        try:
+            if proxy_config and proxy_config.get('useApifyProxy'):
+                proxy_configuration = await Actor.create_proxy_configuration(
+                    actor_proxy_input=proxy_config
+                )
+            elif is_on_platform:
+                # Default to residential proxies if running on Apify platform
+                Actor.log.info('Using default Apify Residential Proxy configuration (CZ)')
+                proxy_configuration = await Actor.create_proxy_configuration(
+                    groups=['RESIDENTIAL'],
+                    country_code='CZ'
+                )
+        except ConnectionError as e:
+            # Proxy access not available (local testing or plan limitation)
+            Actor.log.warning(f'Proxy access not available: {e}')
+            Actor.log.warning('Running without proxies. Expect Cloudflare blocking (403 errors).')
+            proxy_configuration = None
 
         # Define the request handler
         async def request_handler(context: PlaywrightCrawlingContext):
@@ -101,11 +137,14 @@ async def main():
 
             Actor.log.info(f"Found {len(product_links)} products on page.")
             
-            await context.enqueue_links(
-                urls=product_links,
-                label='PRODUCT',
-                strategy='same-domain'
-            )
+            # Only enqueue links that are actually on heureka.cz subdomain
+            heureka_products = [url for url in product_links if '.heureka.cz' in url]
+            if heureka_products:
+                await context.enqueue_links(
+                    urls=heureka_products,
+                    label='PRODUCT',
+                    strategy='same-domain'
+                )
 
             # 2. Enqueue Next Page
             # Look for "Další" or next arrow
@@ -114,10 +153,12 @@ async def main():
             if next_btn and next_btn.get('href'):
                 next_page_links.append(urljoin(request.url, next_btn.get('href')))
             
-            if next_page_links:
-                Actor.log.info(f"Found next page: {next_page_links[0]}")
+            # Only enqueue next page if it's on heureka.cz
+            heureka_next = [url for url in next_page_links if '.heureka.cz' in url]
+            if heureka_next:
+                Actor.log.info(f"Found next page: {heureka_next[0]}")
                 await context.enqueue_links(
-                    urls=next_page_links,
+                    urls=heureka_next,
                     label='CATEGORY',
                     strategy='same-domain'
                 )

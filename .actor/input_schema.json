@@ -29,12 +29,17 @@
         "proxyConfiguration": {
             "title": "Proxy Configuration",
             "type": "object",
-            "description": "Select proxies to be used by your crawler.",
+            "description": "Proxy settings. Residential proxies from Czech Republic are required to bypass Cloudflare protection on Heureka.cz.",
             "editor": "proxy",
             "default": { 
                 "useApifyProxy": true, 
                 "apifyProxyGroups": ["RESIDENTIAL"], 
-                "apifyProxyCountry": "CZ" 
+                "apifyProxyCountry": "CZ"
+            },
+            "prefill": { 
+                "useApifyProxy": true, 
+                "apifyProxyGroups": ["RESIDENTIAL"], 
+                "apifyProxyCountry": "CZ"
             }
         }
     },
