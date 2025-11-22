@@ -118,50 +118,37 @@ async def main():
             request = context.request
             Actor.log.info(f'Scraping Category: {request.url}')
             
-            # 1. Enqueue Products
-            # Selectors for product links (heuristic based on common Heureka patterns)
-            # Usually .c-product__link or similar. We'll look for links inside product containers.
+            # 1. Enqueue Products - ONLY links with .c-product__link class
             product_links = []
-            for a in soup.select('a.c-product__link, .product-container a.product-name'):
+            for a in soup.select('a.c-product__link'):
                 href = a.get('href')
                 if href:
-                    product_links.append(urljoin(request.url, href))
-            
-            # Fallback: Look for any link that looks like a product (often has /product/ or just deep structure)
-            if not product_links:
-                # Try generic grid items
-                for a in soup.select('.c-product-list__item a'):
-                    href = a.get('href')
-                    if href:
-                        product_links.append(urljoin(request.url, href))
+                    full_url = urljoin(request.url, href)
+                    # Only add if it's on heureka.cz subdomain
+                    if '.heureka.cz' in full_url:
+                        product_links.append(full_url)
 
-            Actor.log.info(f"Found {len(product_links)} products on page.")
+            Actor.log.info(f"Found {len(product_links)} product links (.c-product__link)")
             
-            # Only enqueue links that are actually on heureka.cz subdomain
-            heureka_products = [url for url in product_links if '.heureka.cz' in url]
-            if heureka_products:
+            if product_links:
                 await context.enqueue_links(
-                    urls=heureka_products,
+                    urls=product_links,
                     label='PRODUCT',
                     strategy='same-domain'
                 )
 
-            # 2. Enqueue Next Page
-            # Look for "Další" or next arrow
-            next_page_links = []
-            next_btn = soup.select_one('a.c-pagination__link--next, a.next')
+            # 2. Enqueue Pagination (next page) - for finding more product links
+            next_btn = soup.select_one('a.c-pagination__link--next, a.next, .pagination a.next')
             if next_btn and next_btn.get('href'):
-                next_page_links.append(urljoin(request.url, next_btn.get('href')))
-            
-            # Only enqueue next page if it's on heureka.cz
-            heureka_next = [url for url in next_page_links if '.heureka.cz' in url]
-            if heureka_next:
-                Actor.log.info(f"Found next page: {heureka_next[0]}")
-                await context.enqueue_links(
-                    urls=heureka_next,
-                    label='CATEGORY',
-                    strategy='same-domain'
-                )
+                next_url = urljoin(request.url, next_btn.get('href'))
+                # Only enqueue if it's on heureka.cz
+                if '.heureka.cz' in next_url:
+                    Actor.log.info(f"Found pagination link: {next_url}")
+                    await context.enqueue_links(
+                        urls=[next_url],
+                        label='CATEGORY',
+                        strategy='same-domain'
+                    )
 
         async def handle_product(context: PlaywrightCrawlingContext, soup: BeautifulSoup):
             nonlocal product_count
